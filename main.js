@@ -364,7 +364,9 @@ function buildDockMenu() {
           }
         }
         petVisible = !petVisible;
-        app.dock.setMenu(buildDockMenu());
+        if (process.platform === 'darwin' && app.dock) {
+          app.dock.setMenu(buildDockMenu());
+        }
       },
     },
     { type: 'separator' },
@@ -407,7 +409,7 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
 
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && app.dock) {
     const cfg = loadPetConfig();
     const char = argCharacter || cfg.character || 'orc';
     const assetsDir = path.join(__dirname, 'renderer', 'assets');
@@ -417,6 +419,19 @@ function createWindow() {
     const iconPath = fs.existsSync(customIcon) ? customIcon : path.join(assetsDir, iconFile);
     app.dock.setIcon(iconPath);
     app.dock.setMenu(buildDockMenu());
+  }
+
+  // Linux/Wayland: set window icon via BrowserWindow API
+  if (process.platform === 'linux') {
+    const cfg2 = loadPetConfig();
+    const char = argCharacter || cfg2.character || 'orc';
+    const assetsDir = path.join(__dirname, 'renderer', 'assets');
+    const charMap = BUNDLED_CHARS[char] || {};
+    const iconFile = charMap['dock-icon.png'] || BUNDLED_CHARS.orc['dock-icon.png'];
+    const iconPath = path.join(assetsDir, iconFile);
+    if (fs.existsSync(iconPath)) {
+      win.setIcon(iconPath);
+    }
   }
 
   if (process.argv.includes('--dev')) {
@@ -457,6 +472,12 @@ function createWindow() {
 }
 
 app.setName('Peon Pet');
+
+// Linux/Wayland: force Ozone backend so Electron uses the Wayland display
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform');
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
