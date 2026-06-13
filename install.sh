@@ -13,7 +13,8 @@ if [ ! -f "$ELECTRON" ]; then
 fi
 
 # Resolve symlink to the real binary (launchd needs the real path)
-ELECTRON_REAL="$(readlink -f "$ELECTRON" 2>/dev/null || realpath "$ELECTRON")"
+# Using Node.js since readlink -f is not available on macOS
+ELECTRON_REAL="$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" "$ELECTRON")"
 
 echo "Installing peon-pet LaunchAgent..."
 echo "  App dir:  $SCRIPT_DIR"

@@ -8,3 +8,9 @@ dist/
 docs/plans/
 
 *.DS_Store
+
+# AI session artifacts
+.sandbox-home/
+.claw/
+.omo/
+.clawd-todos.json

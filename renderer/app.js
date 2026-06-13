@@ -1,5 +1,15 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 
+function escapeHtml(str) {
+  if (typeof str !== 'string') return str;
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // --- Config ---
 const ATLAS_COLS = 6;
 const ATLAS_ROWS = 6;
@@ -19,6 +29,7 @@ const renderer = new THREE.WebGLRenderer({
   canvas,
   alpha: true,
   antialias: false,
+  powerPreference: 'low-power',
 });
 renderer.setSize(200, 200);
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -100,7 +111,7 @@ const borderTex = loader.load('peon-asset://borders.png', () => {
 });
 const borderMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
-  new THREE.MeshBasicMaterial({ map: borderTex, transparent: true, depthTest: false })
+  new THREE.MeshBasicMaterial({ map: borderTex, transparent: true, depthTest: false, alphaTest: 0.01 })
 );
 borderMesh.position.z = 0.4;
 scene.add(borderMesh);
@@ -380,7 +391,7 @@ function handleMouseMove(e) {
     const status = s.hot ? '<span style="color:#44ff44">active</span>'
                          : s.warm ? '<span style="color:#1aaa1a">idle</span>'
                          : '<span style="color:#555">cold</span>';
-    const label = s.cwd ? s.cwd.split('/').filter(Boolean).pop() : ('\u2026' + s.id.slice(-8));
+    const label = s.cwd ? escapeHtml(s.cwd.split('/').filter(Boolean).pop()) : ('\u2026' + escapeHtml(s.id.slice(-8)));
     html = `${label} &bull; ${status}`;
   } else {
     const active = currentSessions.filter(s => s.hot).length;
@@ -389,7 +400,7 @@ function handleMouseMove(e) {
       html = 'Peon Pet';
     } else {
       const names = currentSessions
-        .map(s => s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null)
+        .map(s => s.cwd ? escapeHtml(s.cwd.split('/').filter(Boolean).pop()) : null)
         .filter(Boolean);
       html = names.length ? names.join('<br>') : `${active}/${total} sessions`;
     }
@@ -483,7 +494,8 @@ window.peonBridge.onSessionUpdate(({ sessions }) => {
 // --- Render loop ---
 let lastTime = 0;
 function animate(time) {
-  requestAnimationFrame(animate);
+  if (rendererDisposed) return;
+  rafId = requestAnimationFrame(animate);
   const delta = Math.min((time - lastTime) / 1000, 0.1);
   lastTime = time;
 
@@ -566,4 +578,36 @@ function animate(time) {
 
   renderer.render(scene, camera);
 }
-requestAnimationFrame(animate);
+
+let rafId = requestAnimationFrame(animate);
+let rendererDisposed = false;
+
+function disposeRenderer() {
+  if (rendererDisposed) return;
+  rendererDisposed = true;
+  cancelAnimationFrame(rafId);
+  if (idleTimer) clearTimeout(idleTimer);
+
+  atlas.dispose();
+  bgTex.dispose();
+  borderTex.dispose();
+  geometry.dispose();
+  material.dispose();
+  bgMesh.geometry.dispose();
+  bgMesh.material.dispose();
+  borderMesh.geometry.dispose();
+  borderMesh.material.dispose();
+  for (const mesh of dotMeshes) {
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+  if (flashMesh) {
+    flashMesh.geometry.dispose();
+    flashMesh.material.dispose();
+  }
+  particleGeo.dispose();
+  particleMat.dispose();
+  renderer.dispose();
+}
+
+window.addEventListener('beforeunload', disposeRenderer);

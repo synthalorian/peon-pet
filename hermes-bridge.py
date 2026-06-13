@@ -37,7 +37,8 @@ CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects" / "hermes"
 
 # Hermes session filenames: 20260519_143052_a1b2c3d4.jsonl
 # We map each to a UUID that peon-pet expects
-_filename_to_uuid: dict[str, str] = {}
+from typing import Dict
+_filename_to_uuid: Dict[str, str] = {}
 
 
 def session_uuid_for(hermes_filename: str) -> str:

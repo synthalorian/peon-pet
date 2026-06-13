@@ -71,8 +71,6 @@ function registerCharacterProtocol() {
     const mapped = charMap[filename] || BUNDLED_CHARS.orc[filename] || filename;
     return net.fetch('file://' + path.join(assetsDir, mapped));
   });
-
-  return { char, assetsDir, customCharDir };
 }
 
 const tracker = createSessionTracker();
@@ -128,12 +126,13 @@ function createSubAgentWindow(sessionId) {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
   subWin.setIgnoreMouseEvents(true);
 
-  subWin.loadFile('renderer/index.html');
+  subWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   subWin.webContents.once('did-finish-load', () => {
     subWin.webContents.send('peon-config', { size: 100, subAgent: true });
@@ -168,6 +167,7 @@ function handleSessionEvent({ sessionId, event, cwd, timestamp }) {
   if (!isValidSessionId(sessionId)) return;
 
   const now = Date.now();
+  const validTimestamp = (typeof timestamp === 'number' && !isNaN(timestamp)) ? timestamp : now;
 
   // SessionCwd: just update the display name, no tracker change
   if (event === 'SessionCwd') {
@@ -183,7 +183,7 @@ function handleSessionEvent({ sessionId, event, cwd, timestamp }) {
     sessionCwds.delete(sessionId);
   } else if (event === 'SessionSeen') {
     // File existed at startup: register with actual file mtime, no animation, no dedup
-    tracker.update(sessionId, timestamp || now);
+    tracker.update(sessionId, validTimestamp || now);
     if (cwd) sessionCwds.set(sessionId, cwd);
   } else {
     if (event === 'SessionStart') {
@@ -231,7 +231,9 @@ function syncRemoteSessionsToTracker(state) {
 
   for (const [sid, entry] of Object.entries(incoming)) {
     if (!isValidSessionId(sid)) continue;
-    tracker.update(sid, entry.timestamp * 1000);  // relay uses Unix seconds
+    const ts = entry.timestamp;
+    const validTs = (typeof ts === 'number' && !isNaN(ts) && ts > 0) ? ts * 1000 : now;
+    tracker.update(sid, validTs);
     if (entry.cwd) sessionCwds.set(sid, entry.cwd);
     remoteSessionIds.add(sid);
     const anim = EVENT_TO_ANIM[entry.event];
@@ -257,7 +259,7 @@ function startPolling() {
   const cfg = loadPetConfig();
   const remoteUrl = cfg.remoteUrl || 'http://127.0.0.1:19998';
 
-  const watcher = new JsonlWatcher();
+  watcher = new JsonlWatcher();
 
   watcher.on('session-event', handleSessionEvent);
   watcher.on('subagent-event', ({ parentToolId, event }) => {
@@ -270,7 +272,7 @@ function startPolling() {
   // Heartbeat: refresh session hot/warm status so the pet correctly decays.
   // Sessions with pending tools are kept hot so the pet stays awake during long tool runs.
   // Also runs the TTL sweep for sub-agent windows whose SubagentStop never fired.
-  setInterval(() => {
+  heartbeatInterval = setInterval(() => {
     const now = Date.now();
     const expired = [...subAgentCreatedAt.entries()]
       .filter(([sid, createdAt]) => now - createdAt > SUB_AGENT_TTL_MS && !dummySessionIds.has(sid))
@@ -285,7 +287,7 @@ function startPolling() {
   }, 5000);
 
   // Remote relay sync (less frequent, not time-critical)
-  setInterval(async () => {
+  remoteSyncInterval = setInterval(async () => {
     syncRemoteSessionsToTracker(await readRemoteState(remoteUrl));
   }, 5000);
 }
@@ -385,6 +387,9 @@ function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const cfg = loadPetConfig();
   const { x, y } = cornerPosition(cfg.corner, width, height);
+  const char = argCharacter || cfg.character || 'orc';
+  const assetsDir = path.join(__dirname, 'renderer', 'assets');
+  const charMap = BUNDLED_CHARS[char] || {};
 
   win = new BrowserWindow({
     width: WIN_SIZE,
@@ -402,19 +407,16 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
   win.setIgnoreMouseEvents(true);
 
-  win.loadFile('renderer/index.html');
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   if (process.platform === 'darwin' && app.dock) {
-    const cfg = loadPetConfig();
-    const char = argCharacter || cfg.character || 'orc';
-    const assetsDir = path.join(__dirname, 'renderer', 'assets');
     const customIcon = path.join(app.getPath('userData'), 'characters', char, 'dock-icon.png');
-    const charMap = BUNDLED_CHARS[char] || {};
     const iconFile = charMap['dock-icon.png'] || BUNDLED_CHARS.orc['dock-icon.png'];
     const iconPath = fs.existsSync(customIcon) ? customIcon : path.join(assetsDir, iconFile);
     app.dock.setIcon(iconPath);
@@ -423,10 +425,6 @@ function createWindow() {
 
   // Linux/Wayland: set window icon via BrowserWindow API
   if (process.platform === 'linux') {
-    const cfg2 = loadPetConfig();
-    const char = argCharacter || cfg2.character || 'orc';
-    const assetsDir = path.join(__dirname, 'renderer', 'assets');
-    const charMap = BUNDLED_CHARS[char] || {};
     const iconFile = charMap['dock-icon.png'] || BUNDLED_CHARS.orc['dock-icon.png'];
     const iconPath = path.join(assetsDir, iconFile);
     if (fs.existsSync(iconPath)) {
@@ -443,10 +441,12 @@ function createWindow() {
 
   // Clean up sub-agent windows when main window closes
   win.on('closed', () => {
+    win = null;
     for (const subWin of subAgentWindows.values()) {
       if (!subWin.isDestroyed()) subWin.destroy();
     }
     subAgentWindows.clear();
+    subAgentCreatedAt.clear();
   });
 
   // Start polling once window is ready
@@ -478,6 +478,35 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
   app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform');
 }
+
+let watcher = null;
+let heartbeatInterval = null;
+let remoteSyncInterval = null;
+
+function stopPolling() {
+  if (watcher) {
+    watcher.stop();
+    watcher = null;
+  }
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+  if (remoteSyncInterval) {
+    clearInterval(remoteSyncInterval);
+    remoteSyncInterval = null;
+  }
+}
+
+app.on('before-quit', stopPolling);
+
+app.on('second-instance', () => {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
