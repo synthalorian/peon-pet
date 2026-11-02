@@ -9,7 +9,7 @@ Sits in the bottom-left corner of your screen, floats over all windows, and igno
 ## Requirements
 
 - macOS (Linux/Windows untested)
-- Node.js 18+
+- Node.js 22.12+
 - [peon-ping](https://peonping.com) installed and running
 
 ## Quick start
