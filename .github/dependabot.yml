@@ -1,0 +1,52 @@
+version: 2
+updates:
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 5
+  groups:
+    github-actions-minor-patch:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  ignore:
+  - dependency-name: "*"
+    update-types:
+    - "version-update:semver-major"
+- package-ecosystem: npm
+  directories:
+  - /
+  - /patches/boolean-shim
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 5
+  groups:
+    npm-minor-patch:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  ignore:
+  - dependency-name: "*"
+    update-types:
+    - "version-update:semver-major"
+- package-ecosystem: pip
+  directory: /
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 5
+  groups:
+    pip-minor-patch:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  ignore:
+  - dependency-name: "*"
+    update-types:
+    - "version-update:semver-major"
