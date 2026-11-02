@@ -12,6 +12,10 @@ if [ ! -f "$ELECTRON" ]; then
   exit 1
 fi
 
+# Electron 42+ no longer downloads its binary on npm install; fetch it now so
+# launchd does not have to download it on first start.
+"$SCRIPT_DIR/node_modules/.bin/install-electron" --no
+
 # Resolve symlink to the real binary (launchd needs the real path)
 # Using Node.js since readlink -f is not available on macOS
 ELECTRON_REAL="$(node -e "console.log(require('fs').realpathSync(process.argv[1]))" "$ELECTRON")"
